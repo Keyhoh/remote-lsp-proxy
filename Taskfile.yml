@@ -1,0 +1,44 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+
+version: '3'
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  build:
+    desc: Build the Go project into a binary named remote-lsp-proxy
+    generates:
+      - remote-lsp-proxy
+    cmds:
+      - go build -o remote-lsp-proxy ./cmd/remote-lsp-proxy
+
+  test:
+    desc: Run Go tests
+    cmds:
+      - go test ./...
+
+  fmt:
+    desc: Format Go sources
+    cmds:
+      - gofmt -w ./cmd ./internal
+
+  vet:
+    desc: Run go vet
+    cmds:
+      - go vet ./...
+
+  check:
+    desc: Run formatting, vet, and tests
+    deps:
+      - fmt
+      - vet
+      - test
+
+  run:
+    desc: Run the remote LSP proxy
+    cmds:
+      - go run ./cmd/remote-lsp-proxy {{.CLI_ARGS}}
+

@@ -15,4 +15,5 @@
 
 # OS metadata
 .DS_Store
-main
+remote-lsp-proxy
+
