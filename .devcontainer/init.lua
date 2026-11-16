@@ -1,6 +1,6 @@
 local host_root = vim.fs.root(0, { ".git", "go.mod" }) or vim.fn.getcwd()
 local proxy_bin = host_root .. "/remote-lsp-proxy"
-local remote_root = "/workspaces/devcontainer.lsp"
+local remote_root = "/workspaces/remote-lsp-proxy"
 
 vim.lsp.config("gopls", {
   cmd = {

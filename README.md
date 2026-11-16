@@ -88,7 +88,7 @@ Example with a local repo mounted in a Dev Container:
 ```bash
 ./remote-lsp-proxy \
   --local-workspace "$PWD" \
-  --remote-workspace /workspaces/devcontainer.lsp \
+  --remote-workspace /workspaces/remote-lsp-proxy \
   --remote-command gopls \
   --remote-args "serve"
 ```

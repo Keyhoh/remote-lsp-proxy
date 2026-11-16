@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Keyhoh/devcontainer.lsp/internal/runtime"
+	"github.com/Keyhoh/remote-lsp-proxy/internal/runtime"
 )
 
 // Direction describes the namespace translation direction for a URI.

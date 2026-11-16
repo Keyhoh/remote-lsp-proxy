@@ -6,7 +6,7 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/Keyhoh/devcontainer.lsp/internal/runtime"
+	"github.com/Keyhoh/remote-lsp-proxy/internal/runtime"
 )
 
 // DevContainer is the default backend implementation for the initial release.

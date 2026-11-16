@@ -1,4 +1,4 @@
-# Copilot instructions for devcontainer.lsp
+# Copilot instructions for remote-lsp-proxy
 
 ## Repository context
 
