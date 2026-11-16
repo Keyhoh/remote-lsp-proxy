@@ -81,13 +81,38 @@ func (p *commandProcess) Wait() error {
 }
 
 func (p *commandProcess) Close() error {
+	var errs []error
+	
+	// Close stdin to signal EOF to the process
 	if p.stdin != nil {
-		_ = p.stdin.Close()
+		if err := p.stdin.Close(); err != nil {
+			errs = append(errs, err)
+		}
 	}
-	if p.cmd.Process != nil {
-		_ = p.cmd.Process.Kill()
+	
+	// Give the process time to exit gracefully
+	if p.cmd.ProcessState == nil {
+		// Process is still running, wait for it to exit on its own
+		if err := p.cmd.Wait(); err != nil {
+			errs = append(errs, err)
+		}
 	}
-	return p.Wait()
+	
+	// Only kill if still running after Wait()
+	if p.cmd.Process != nil && p.cmd.ProcessState == nil {
+		if err := p.cmd.Process.Kill(); err != nil {
+			errs = append(errs, err)
+		}
+		if err := p.cmd.Wait(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	
+	// Return first error if any
+	if len(errs) > 0 {
+		return errs[0]
+	}
+	return nil
 }
 
 func (p *commandProcess) Stdin() io.WriteCloser {

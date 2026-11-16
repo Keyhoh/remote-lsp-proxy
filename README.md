@@ -61,7 +61,7 @@ Start the proxy with the local workspace root, the corresponding remote workspac
   --local-workspace /home/user/project \
   --remote-workspace /workspace/project \
   --remote-command gopls \
-  --remote-args "--stdio"
+  --remote-args "serve"
 ```
 
 Or using Task:
@@ -71,7 +71,7 @@ task run -- \
   --local-workspace /home/user/project \
   --remote-workspace /workspace/project \
   --remote-command gopls \
-  --remote-args "--stdio"
+  --remote-args "serve"
 ```
 
 ### Required arguments
@@ -90,7 +90,7 @@ Example with a local repo mounted in a Dev Container:
   --local-workspace "$PWD" \
   --remote-workspace /workspaces/devcontainer.lsp \
   --remote-command gopls \
-  --remote-args "--stdio"
+  --remote-args "serve"
 ```
 
 In a Dev Container, `devcontainer exec --workspace-folder "$PWD"` resolves the correct container workspace before invoking the language server. The value used for `--local-workspace` must be valid on the host machine.

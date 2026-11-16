@@ -8,6 +8,7 @@ vim.lsp.config("gopls", {
     "--local-workspace", host_root,
     "--remote-workspace", remote_root,
     "--remote-command", "gopls",
+    "--remote-args", "serve",
   },
   root_dir = host_root,
   filetypes = { "go", "gomod", "gowork" },
@@ -19,4 +20,3 @@ vim.lsp.config("gopls", {
 })
 
 vim.lsp.enable("gopls")
-

@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/Keyhoh/devcontainer.lsp/internal/backend"
@@ -109,35 +111,44 @@ func (p *Proxy) Run() error {
 		stderrErr <- copyStream(proc.Stderr(), p.cfg.Stderr)
 	}()
 
-	for {
+	localClosed := false
+	remoteClosed := false
+
+	for !(localClosed && remoteClosed) {
 		select {
 		case err := <-localToRemoteErr:
 			if err != nil && err != io.EOF {
 				return err
 			}
-			return nil
+			localClosed = true
+			_ = proc.Stdin().Close()
 		case err := <-remoteToLocalErr:
 			if err != nil && err != io.EOF {
 				return err
 			}
-			return nil
+			remoteClosed = true
+			if waitErr := proc.Wait(); waitErr != nil {
+				return waitErr
+			}
 		case err := <-stderrErr:
 			if err != nil && err != io.EOF {
 				return err
 			}
 		}
 	}
+	return nil
 }
 
 func relayMessages(reader io.Reader, writer io.Writer, transform func([]byte) ([]byte, error)) error {
-	messages, err := DecodeJSONRPCMessages(reader)
-	if err != nil {
-		if err == io.EOF {
-			return io.EOF
+	br := bufio.NewReader(reader)
+	for {
+		msg, err := readJSONRPCMessage(br)
+		if err != nil {
+			if err == io.EOF {
+				return io.EOF
+			}
+			return err
 		}
-		return err
-	}
-	for _, msg := range messages {
 		out, err := transform(msg)
 		if err != nil {
 			return err
@@ -146,7 +157,36 @@ func relayMessages(reader io.Reader, writer io.Writer, transform func([]byte) ([
 			return err
 		}
 	}
-	return nil
+}
+
+func readJSONRPCMessage(r *bufio.Reader) ([]byte, error) {
+	contentLength := -1
+	for {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			return nil, err
+		}
+		if line == "\r\n" {
+			break
+		}
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(strings.ToLower(line), "content-length:") {
+			raw := strings.TrimSpace(line[len("content-length:"):])
+			n, err := strconv.Atoi(raw)
+			if err != nil {
+				return nil, fmt.Errorf("invalid Content-Length header: %w", err)
+			}
+			contentLength = n
+		}
+	}
+	if contentLength < 0 {
+		return nil, fmt.Errorf("missing Content-Length header")
+	}
+	body := make([]byte, contentLength)
+	if _, err := io.ReadFull(r, body); err != nil {
+		return nil, err
+	}
+	return body, nil
 }
 
 func copyStream(src io.Reader, dst io.Writer) error {
