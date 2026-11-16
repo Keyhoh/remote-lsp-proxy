@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Keyhoh/devcontainer.lsp/internal/backend"
+	"github.com/Keyhoh/devcontainer.lsp/internal/runtime"
 )
 
 // Direction describes the namespace translation direction for a URI.
@@ -31,7 +31,7 @@ type Config struct {
 	Command         string
 	Args            []string
 	Env             []string
-	Backend         backend.Runner
+	Backend         runtime.Runner
 	Stdin           io.Reader
 	Stdout          io.Writer
 	Stderr          io.Writer
@@ -117,13 +117,13 @@ func (p *Proxy) Run() error {
 	for !(localClosed && remoteClosed) {
 		select {
 		case err := <-localToRemoteErr:
-			if err != nil && err != io.EOF {
+			if !isEndOfStream(err) {
 				return err
 			}
 			localClosed = true
 			_ = proc.Stdin().Close()
 		case err := <-remoteToLocalErr:
-			if err != nil && err != io.EOF {
+			if !isEndOfStream(err) {
 				return err
 			}
 			remoteClosed = true
@@ -131,12 +131,16 @@ func (p *Proxy) Run() error {
 				return waitErr
 			}
 		case err := <-stderrErr:
-			if err != nil && err != io.EOF {
+			if !isEndOfStream(err) {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+func isEndOfStream(err error) bool {
+	return err == nil || err == io.EOF
 }
 
 func relayMessages(reader io.Reader, writer io.Writer, transform func([]byte) ([]byte, error)) error {
@@ -228,30 +232,31 @@ func (p *Proxy) translatePath(raw string, dir Direction) string {
 }
 
 func (p *Proxy) mapPath(path string, dir Direction) string {
-	if path == "" { return path }
-	clean := filepath.Clean(path)
+	if path == "" {
+		return path
+	}
 	if dir == LocalToRemote {
-		if p.mapper.LocalRoot == "" || p.mapper.RemoteRoot == "" {
-			return clean
-		}
-		if clean == p.mapper.LocalRoot {
-			return p.mapper.RemoteRoot
-		}
-		if rel, err := filepath.Rel(p.mapper.LocalRoot, clean); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return filepath.Join(p.mapper.RemoteRoot, rel)
-		}
+		return mapPathBetweenRoots(path, p.mapper.LocalRoot, p.mapper.RemoteRoot)
+	}
+	return mapPathBetweenRoots(path, p.mapper.RemoteRoot, p.mapper.LocalRoot)
+}
+
+func mapPathBetweenRoots(path, fromRoot, toRoot string) string {
+	clean := filepath.Clean(path)
+	if fromRoot == "" || toRoot == "" {
 		return clean
 	}
-	if p.mapper.RemoteRoot == "" || p.mapper.LocalRoot == "" {
+	if clean == fromRoot {
+		return toRoot
+	}
+	rel, err := filepath.Rel(fromRoot, clean)
+	if err != nil {
 		return clean
 	}
-	if clean == p.mapper.RemoteRoot {
-		return p.mapper.LocalRoot
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return clean
 	}
-	if rel, err := filepath.Rel(p.mapper.RemoteRoot, clean); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return filepath.Join(p.mapper.LocalRoot, rel)
-	}
-	return clean
+	return filepath.Join(toRoot, rel)
 }
 
 func (p *Proxy) transformJSONRPC(raw []byte, dir Direction) ([]byte, error) {
@@ -272,8 +277,13 @@ func (p *Proxy) transformValue(v any, dir Direction) any {
 				continue
 			}
 			if key == "changes" {
-				mapped := make(map[string]any, len(child.(map[string]any)))
-				for uri, next := range child.(map[string]any) {
+				changes, ok := child.(map[string]any)
+				if !ok {
+					out[key] = p.transformValue(child, dir)
+					continue
+				}
+				mapped := make(map[string]any, len(changes))
+				for uri, next := range changes {
 					mapped[p.translateURI(uri, dir)] = p.transformValue(next, dir)
 				}
 				out[key] = mapped

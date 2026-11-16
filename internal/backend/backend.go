@@ -5,21 +5,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
+
+	"github.com/Keyhoh/devcontainer.lsp/internal/runtime"
 )
-
-// Process represents the lifecycle of a remote language server process.
-type Process interface {
-	Wait() error
-	Close() error
-	Stdin() io.WriteCloser
-	Stdout() io.Reader
-	Stderr() io.Reader
-}
-
-// Runner starts and manages a process in the remote execution environment.
-type Runner interface {
-	Start(command string, args []string, dir string, env []string) (Process, error)
-}
 
 // DevContainer is the default backend implementation for the initial release.
 type DevContainer struct{}
@@ -32,7 +20,7 @@ func NewDevContainer() *DevContainer {
 // `devcontainer exec` command. `dir` is the host workspace path that identifies
 // the correct devcontainer; the command itself should run inside that container
 // and must not set the local process working directory to a remote path.
-func (d *DevContainer) Start(command string, args []string, dir string, env []string) (Process, error) {
+func (d *DevContainer) Start(command string, args []string, dir string, env []string) (runtime.Process, error) {
 	if command == "" {
 		return nil, fmt.Errorf("remote command is required")
 	}
