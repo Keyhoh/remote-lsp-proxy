@@ -82,7 +82,7 @@ func (p *Proxy) Run() error {
 		p.cfg.Stderr = os.Stderr
 	}
 
-	proc, err := p.cfg.Backend.Start(p.cfg.Command, p.cfg.Args, p.cfg.RemoteWorkspace, p.cfg.Env)
+	proc, err := p.cfg.Backend.Start(p.cfg.Command, p.cfg.Args, p.cfg.LocalWorkspace, p.cfg.Env)
 	if err != nil {
 		return err
 	}

@@ -1,229 +1,124 @@
 # Remote LSP Proxy
 
-A protocol-faithful proxy that lets a local editor communicate with a Language Server running in a remote environment while preserving the normal LSP protocol behavior.
+A protocol-faithful LSP proxy that lets a local editor communicate with a Language Server running in a remote environment while preserving the normal LSP/JSON-RPC behavior.
 
-This repository is currently a design and implementation project grounded in `SPECIFICATION.md`. The goal is to bridge the gap between a local client such as Neovim and a remote language server process without changing the LSP contract itself.
+This project exposes a local stdio endpoint, translates `file:` URIs between local and remote workspaces, and forwards traffic to a language server launched in a remote backend such as a Dev Container.
 
 ## Overview
 
-The proxy sits between a local LSP client and a remote Language Server. It relays JSON-RPC messages over stdio, manages the lifecycle of the remote server process, and translates local and remote paths when the client and server refer to the same file with different absolute paths.
+The proxy sits between a local LSP client and a remote language server. It relays JSON-RPC traffic over stdio, manages the remote process lifecycle, and maps workspace paths so a local file URI and a remote file URI can point to the same underlying file.
 
-The design assumes the following:
-
-- The local editor runs on the developer machine.
-- The language server runs in a remote execution environment such as a Dev Container.
-- The local and remote environments share the same underlying files, even if their absolute paths differ.
-- LSP semantics remain unchanged; only transport, process execution, and path translation are adapted.
-
-## Architecture
+Typical flow:
 
 ```text
-┌──────────────────────────────┐
-│         Local Host           │
-│                              │
-│  ┌────────────┐              │
-│  │   Neovim   │              │
-│  └─────┬──────┘              │
-│        │ stdio               │
-│  ┌─────▼──────┐              │
-│  │   Proxy    │              │
-│  └─────┬──────┘              │
-│        │                     │
-│  ┌─────▼──────┐              │
-│  │  Backend   │              │
-│  └─────┬──────┘              │
-└────────┼─────────────────────┘
-         │ Remote Execution
-         │
-┌────────▼─────────────────────┐
-│       Remote Environment     │
-│                              │
-│  ┌────────────┐              │
-│  │ Language   │              │
-│  │  Server    │              │
-│  └────────────┘              │
-│                              │
-└──────────────────────────────┘
-```
-
-The proxy is started locally and communicates with the remote backend, which launches the language server in the remote environment. The initial backend target is the Dev Container CLI (`devcontainer exec`), but the design is intentionally backend-agnostic.
-
-```text
-Neovim
-  │
-  │ stdio
-  ▼
+Neovim / editor
+      │
+      │ stdio
+      ▼
 Remote LSP Proxy
-  │
-  │ devcontainer exec
-  ▼
-Language Server
+      │
+      │ devcontainer exec
+      ▼
+Remote language server
 ```
 
-The proxy and the language server communicate over standard input and output. No dedicated remote TCP listener or long-running sidecar process is required.
+The default backend uses the Dev Container CLI (`devcontainer exec`), but the proxy is designed around a backend interface so a different remote execution strategy can be plugged in later.
 
-## Core Principles
+## Features
 
-- Do not change the LSP protocol itself.
-- Only translate or adapt the transport and environment differences required for remote execution.
-- Preserve JSON-RPC 2.0 semantics and message ordering.
-- Keep backend details isolated from the core proxy logic.
-- Translate only actual `file:` URIs; leave non-file URIs such as `http:` and `https:` untouched.
-- Treat file synchronization and remote filesystem proxying as out of scope.
-- Assume local and remote files are the same underlying content, but not necessarily at the same absolute path.
+- Bi-directional stdio relay between local client and remote LSP server
+- JSON-RPC framing handling for split and batched messages
+- `file:` URI translation based on local/remote workspace mappings
+- Remote process lifecycle management for language servers
+- Clean separation between proxy logic and runtime/backend details
 
-## Key Requirements
+## Prerequisites
 
-### 1. Remote process lifecycle management
+- Go toolchain
+- `devcontainer` CLI installed and available in PATH
+- Optional but recommended: `task` for easier local commands
 
-The proxy must start, monitor, and terminate the remote language server process as needed.
+## Build
 
-Required responsibilities include:
+Build the proxy binary:
 
-- launching the remote command
-- passing command-line arguments
-- setting the remote working directory
-- injecting required environment variables
-- capturing stdin, stdout, and stderr
-- detecting process completion
-- handling cleanup after shutdown
+```bash
+# with Task
+task build
 
-The language server process should be managed per client connection, while the remote execution environment itself can be shared across multiple language servers.
-
-### 2. Bidirectional stdio relay
-
-The proxy relays messages between the local client and the remote language server in both directions.
-
-It must:
-
-- support full-duplex communication
-- propagate EOF and process exit
-- handle buffering and backpressure
-- preserve stderr separately from LSP JSON traffic
-- clean up resources when communication is interrupted
-
-The client-facing stdout/stderr must not be polluted with non-LSP logs.
-
-### 3. JSON-RPC framing
-
-LSP messages are framed as:
-
-```text
-Content-Length: 123\r\n
-\r\n
-{"jsonrpc":"2.0","method":"..."}
+# or directly with Go
+go build -o remote-lsp-proxy ./cmd/remote-lsp-proxy
 ```
 
-The proxy must parse and re-emit `Content-Length` headers correctly and robustly handle:
+This produces a binary named `remote-lsp-proxy`.
 
-- split messages across reads
-- batched messages in one stream payload
-- partial frame boundaries
-- serialization of message bodies
-- recalculation of `Content-Length` when re-sending data
+## Usage
 
-### 4. File URI translation
+Start the proxy with the local workspace root, the corresponding remote workspace root, and the remote command you want to execute.
 
-When local and remote paths differ, the proxy translates `file:` URIs in LSP messages between the two environments.
-
-Example:
-
-```text
-Local:
-file:///home/user/project/src/main.ts
-
-Remote:
-file:///workspace/project/src/main.ts
+```bash
+./remote-lsp-proxy \
+  --local-workspace /home/user/project \
+  --remote-workspace /workspace/project \
+  --remote-command gopls \
+  --remote-args "--stdio"
 ```
 
-The translation must be based on workspace mapping, not raw string replacement. The implementation should account for:
+Or using Task:
 
-- URI decoding/encoding
-- platform-specific path representation
-- directory boundary correctness
-- normalization of paths
-- avoiding unintended translation outside the configured workspace roots
-
-Only `file:` URIs are translated. Other URI schemes remain unchanged.
-
-### 5. URI-aware LSP message conversion
-
-The proxy should not hardcode only a few methods. Instead, it should work from the LSP 3.18 data model and translate URIs according to the structure in which they appear.
-
-Examples of URI-bearing objects include:
-
-- `TextDocumentIdentifier`
-- `VersionedTextDocumentIdentifier`
-- `TextDocumentItem`
-- `Location`
-- `WorkspaceEdit`
-- `WorkspaceFolder`
-- `DiagnosticRelatedInformation`
-- `DocumentLink`
-
-The proxy also needs to translate URIs in requests, notifications, and responses as they pass through the system, according to the actual communication direction and the URI namespace referenced by the message.
-
-### 6. `processId` handling
-
-The `initialize` request includes a `processId` describing the client process in the local environment. This value is not meaningful in the remote environment and may not even be valid there.
-
-For the initial implementation, the proxy will normalize it to `null` before forwarding the request to the remote language server:
-
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "initialize",
-  "params": {
-    "processId": null
-  }
-}
+```bash
+task run -- \
+  --local-workspace /home/user/project \
+  --remote-workspace /workspace/project \
+  --remote-command gopls \
+  --remote-args "--stdio"
 ```
 
-The proxy remains responsible for detecting local client shutdown and cleaning up the remote language server process.
+### Required arguments
 
-### 7. Remote working directory selection
+- `--local-workspace`: required; host filesystem root for the project; this is the path the local editor and the host machine use
+- `--remote-workspace`: required; remote filesystem root where the language server should run inside the execution environment
+- `--remote-command`: required; executable to launch remotely (for example `gopls`, `clangd`, `rust-analyzer`)
+- `--remote-args`: optional quoted arguments passed to the remote command
 
-When starting the remote language server, the proxy must set the working directory to the corresponding remote workspace path.
+Important: for the default Dev Container backend, `devcontainer exec --workspace-folder` must receive the host-side workspace path, not the container-side path. The container-side path is still used for URI mapping and remote execution, but it should not be used as the local process working directory.
 
-For example:
+Example with a local repo mounted in a Dev Container:
 
-```text
-Local Workspace: /home/user/project
-Remote Workspace: /workspace/project
+```bash
+./remote-lsp-proxy \
+  --local-workspace "$PWD" \
+  --remote-workspace /workspaces/devcontainer.lsp \
+  --remote-command gopls \
+  --remote-args "--stdio"
 ```
 
-The remote language server should be launched with the mapped remote workspace path as its working directory.
+In a Dev Container, `devcontainer exec --workspace-folder "$PWD"` resolves the correct container workspace before invoking the language server. The value used for `--local-workspace` must be valid on the host machine.
 
-## Non-Goals
+## How it works
 
-The initial design intentionally excludes the following:
+1. The local editor connects to the proxy over stdio.
+2. The proxy normalizes and forwards messages according to JSON-RPC framing rules.
+3. The proxy translates `file:` URIs from the local workspace namespace to the remote workspace namespace and vice versa.
+4. The remote language server is launched through the configured backend (`devcontainer exec` by default).
+5. Responses are relayed back to the editor without changing the LSP protocol contract.
 
-- file synchronization
-- remote filesystem proxying
-- transfer of file contents between environments
-- maintaining a separate local/remote content mirror
-- full remote file system abstraction
+## Notes
 
-The proxy does not provide a new filesystem model. It simply translates the path namespace so the same file can be addressed correctly by both sides.
+- This project is intended for editors or tools that launch LSP servers through stdio.
+- The proxy does not synchronize files or emulate a remote filesystem; it only translates path namespaces.
+- The current implementation is a practical foundation for remote LSP execution and is still designed to remain backend-agnostic.
 
-## Implementation Scope and Constraints
+For deeper protocol and design details, see `SPECIFICATION.md`.
 
-The repository is currently centered on the design of the proxy rather than a full production implementation. The design emphasizes:
+## Status
 
-- protocol fidelity to LSP and JSON-RPC 2.0
-- clean separation of backend concerns from proxy logic
-- reliable stdio transport behavior
-- correct workspace mapping for file URIs
-- minimal impact on the language server and editor behavior
-
-## Dev Container-first Execution Model
+The repository includes the proxy implementation and the default Dev Container-backed runtime integration, while still keeping the design grounded in the specification and backend abstraction described in `SPECIFICATION.md`.
 
 The initial runtime target is a Dev Container environment. The remote backend is expected to wrap the language server process by invoking Dev Container tooling such as `devcontainer exec`.
 
 This keeps the design compatible with local development environments while allowing remote execution without introducing a custom remote transport layer.
 
-## Status
-
-This repository is currently a specification-driven foundation for a remote LSP proxy. It does not yet ship a complete implementation; instead, it documents the architecture, protocol assumptions, and the key behavior required for a correct remote LSP bridge.
+This repository is currently a specification-driven foundation for a remote LSP proxy. It does not yet ship a complete production implementation; instead, it documents the architecture, protocol assumptions, and the key behavior required for a correct remote LSP bridge.
 
 For the detailed protocol requirements, message mapping rules, and edge cases, refer to `SPECIFICATION.md`.

@@ -21,8 +21,8 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 	flags.SetOutput(io.Discard)
 
 	var (
-		localWorkspace  = flags.String("local-workspace", ".", "local workspace root")
-		remoteWorkspace = flags.String("remote-workspace", ".", "remote workspace root")
+		localWorkspace  = flags.String("local-workspace", "", "local workspace root")
+		remoteWorkspace = flags.String("remote-workspace", "", "remote workspace root")
 		command         = flags.String("remote-command", "", "language server command to run remotely")
 		argsString      = flags.String("remote-args", "", "space-delimited arguments for the remote command")
 	)
@@ -43,16 +43,25 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 		return 2
 	}
 
+	if *localWorkspace == "" {
+		fmt.Fprintln(stderr, "local-workspace is required; pass the host workspace path")
+		return 1
+	}
+	if *remoteWorkspace == "" {
+		fmt.Fprintln(stderr, "remote-workspace is required; pass the workspace path inside the remote environment")
+		return 1
+	}
+	if *command == "" {
+		fmt.Fprintln(stderr, "remote-command is required; pass the language server command to run remotely")
+		return 1
+	}
+
 	cfg := proxy.Config{
 		LocalWorkspace:  *localWorkspace,
 		RemoteWorkspace: *remoteWorkspace,
 		Backend:         backend.NewDevContainer(),
 		Command:         *command,
 		Args:            splitArgs(*argsString),
-	}
-	if cfg.Command == "" {
-		fmt.Fprintln(stderr, "remote command is required; pass --remote-command and optional --remote-args")
-		return 1
 	}
 
 	p := proxy.New(cfg)

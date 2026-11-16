@@ -29,20 +29,20 @@ func NewDevContainer() *DevContainer {
 }
 
 // Start launches a process inside the Dev Container environment using the
-// `devcontainer exec` command. This keeps the runtime details isolated from the
-// proxy logic while matching the repository's architecture.
+// `devcontainer exec` command. `dir` is the host workspace path that identifies
+// the correct devcontainer; the command itself should run inside that container
+// and must not set the local process working directory to a remote path.
 func (d *DevContainer) Start(command string, args []string, dir string, env []string) (Process, error) {
 	if command == "" {
 		return nil, fmt.Errorf("remote command is required")
 	}
 	if dir == "" {
-		return nil, fmt.Errorf("remote workspace is required")
+		return nil, fmt.Errorf("workspace root is required")
 	}
 
 	cmdArgs := []string{"exec", "--workspace-folder", dir, "--", command}
 	cmdArgs = append(cmdArgs, args...)
 	cmd := exec.Command("devcontainer", cmdArgs...)
-	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), env...)
 
 	stdin, err := cmd.StdinPipe()
